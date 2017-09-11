@@ -158,7 +158,7 @@ public class ContrarianTastesRetrieverDfImpl extends AbstractContrarianTastesRet
                         // group by customerId
                 .groupByKey()
                         // filter out customers not rated ALL top movies
-                .filter(customerMoviesRatings -> iCustomerRatedAllMovies(customerMoviesRatings, broadcastTopMovies.getValue()))
+                .filter(customerMoviesRatings -> isCustomerRatedAllMovies(customerMoviesRatings, broadcastTopMovies.getValue()))
                         // get only top movies ratings
                 .mapValues(movieRatingPairs -> getMatchingMoviesRatings(movieRatingPairs, broadcastTopMovies.getValue()))
                         // get average of top movies ratings
@@ -172,7 +172,7 @@ public class ContrarianTastesRetrieverDfImpl extends AbstractContrarianTastesRet
                 .limit(contrarianUsersNumber);
     }
 
-    private Boolean iCustomerRatedAllMovies(Tuple2<Integer, Iterable<Tuple2<Integer, Integer>>> customerMoviesRatings, Set<Integer> movies) {
+    private Boolean isCustomerRatedAllMovies(Tuple2<Integer, Iterable<Tuple2<Integer, Integer>>> customerMoviesRatings, Set<Integer> movies) {
         // Since the number of movies is in the hundreds of thousands (< 1 000 000),
         // the size of HashSet is < ~24MB ( (16 bytes (object overhead) + 4 bytes (int)+ 4 bytes (padding)) * 1 000 000).
         // Therefore it could be stored in the memory.
