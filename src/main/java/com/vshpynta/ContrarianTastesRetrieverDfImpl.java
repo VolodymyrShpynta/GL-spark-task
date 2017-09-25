@@ -172,6 +172,14 @@ public class ContrarianTastesRetrieverDfImpl extends AbstractContrarianTastesRet
                 .limit(contrarianUsersNumber);
     }
 
+    /**
+     * Returns true if collectionOfMoviesRatings contains entries (Tuple2(movieId, ratingValue)) for all specified movies IDs.
+     *
+     * @param customerMoviesRatings - Tuple2(customerId,  collectionOfMoviesRatings).
+     *                              collectionOfMoviesRatings - Iterable(Tuple2(movieId, ratingValue))
+     * @param movies                - specified movies IDs
+     * @return
+     */
     private Boolean isCustomerRatedAllMovies(Tuple2<Integer, Iterable<Tuple2<Integer, Integer>>> customerMoviesRatings, Set<Integer> movies) {
         // Since the number of movies is in the hundreds of thousands (< 1 000 000),
         // the size of HashSet is < ~24MB ( (16 bytes (object overhead) + 4 bytes (int)+ 4 bytes (padding)) * 1 000 000).
@@ -181,6 +189,13 @@ public class ContrarianTastesRetrieverDfImpl extends AbstractContrarianTastesRet
         return ratedMovies.containsAll(movies);
     }
 
+    /**
+     * Returns ratings values of specified movies
+     *
+     * @param movieRatingsTuples - Iterable(Tuple2(movieId, ratingValue)) - movies ratings infos, from which only the ratings of movies with specified IDs should be selected
+     * @param moviesToMatch      - specified movies IDs
+     * @return
+     */
     private List<Integer> getMatchingMoviesRatings(Iterable<Tuple2<Integer, Integer>> movieRatingsTuples, Set<Integer> moviesToMatch) {
         List<Integer> matchedMoviesRatings = new LinkedList<>();
         movieRatingsTuples.forEach(movieRatingPair -> {

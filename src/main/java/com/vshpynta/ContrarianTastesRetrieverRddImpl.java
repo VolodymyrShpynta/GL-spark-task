@@ -71,6 +71,13 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
         log.info("Execution time (ms): " + (System.nanoTime() - startTime) / 1_000_000);
     }
 
+
+    /**
+     * Create PairRDD of (movieId, movieRatingsInfos)
+     *
+     * @param ctx
+     * @return
+     */
     private JavaPairRDD<Integer, Set<RatingInfo>> createMovieRatingsRdd(JavaSparkContext ctx) {
         return ctx.wholeTextFiles(composeRatingsFilesPath(), partitionsNumber)
                 .mapToPair(fileNameContentTuple -> {
@@ -98,6 +105,12 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                 .build();
     }
 
+    /**
+     * Create PairRDD of (movieId, movieInfo)
+     *
+     * @param ctx
+     * @return
+     */
     private JavaPairRDD<Integer, MovieInfo> createMoviesInfoRdd(JavaSparkContext ctx) {
         return ctx.textFile(movieTitlesFileLocation, partitionsNumber)
                 .map(row -> row.split(COLUMNS_SEPARATOR))
@@ -113,17 +126,32 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                 });
     }
 
+    /**
+     * Retrieve IDs of top movies
+     *
+     * @param moviesInfoRdd   - PairRDD of (movieId, movieInfo)
+     * @param movieRatingsRdd - PairRDD of (movieId, movieRatingsInfos)
+     * @return
+     */
     private Set<Integer> retrieveTopMovies(JavaPairRDD<Integer, MovieInfo> moviesInfoRdd,
                                            JavaPairRDD<Integer, Set<RatingInfo>> movieRatingsRdd) {
         JavaPairRDD<Integer, Double> movieAverageRatingRdd = calculateAverageRatings(movieRatingsRdd);
         return movieAverageRatingRdd
+                // get PairRDD of (movieId, Tuple2(averageMovieRating, MovieInfo))
                 .join(moviesInfoRdd)
                 .top(topMoviesNumber, new RatingMovieDetailsComparator())
                 .stream()
+                        // get top movies IDs
                 .map(Tuple2::_1)
                 .collect(toSet());
     }
 
+    /**
+     * Returns an PairRDD of (movieId, averageMovieRating)
+     *
+     * @param movieRatingsRdd - PairRDD of (movieId, movieRatingsInfos)
+     * @return
+     */
     private JavaPairRDD<Integer, Double> calculateAverageRatings(JavaPairRDD<Integer, Set<RatingInfo>> movieRatingsRdd) {
         return movieRatingsRdd
                 .filter(movieRatings -> movieRatings._2().size() > minRateUsersNumber)
@@ -135,20 +163,28 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                                 .getAsDouble());
     }
 
+    /**
+     * Returns IDs of contrarian customers
+     *
+     * @param movieRatingsRdd    - PairRDD of (movieId, movieRatingsInfos)
+     * @param broadcastTopMovies - top movies IDs
+     * @return
+     */
     private Set<Integer> retrieveContrarianCustomers(JavaPairRDD<Integer, Set<RatingInfo>> movieRatingsRdd, Broadcast<Set<Integer>> broadcastTopMovies) {
         return movieRatingsRdd
                 // keep only top movies ratings
                 .filter(movieRatingTuple -> broadcastTopMovies.getValue().contains(movieRatingTuple._1()))
+                        // transform PairRDD(movieId, Set<RatingInfo>) to PairRDD(movieId, RatingInfo)
                 .flatMapValues(ratingInfos -> ratingInfos)
                         // get RatingInfo from Tuple2(movieId, RatingInfo)
                 .map(Tuple2::_2)
-                        // Tuple2(customerId, Tuple2(movieId, rating))
+                        // map movieRatingsInfos by customerId: Tuple2(customerId, RatingInfo)
                 .mapToPair(ratingInfo -> new Tuple2<>(ratingInfo.getCustomerId(), ratingInfo))
                         //group by customerId
                 .groupByKey()
                         // filter out customers not rated ALL top movies
                 .filter(customerRatingInfos -> isCustomerRatedAllMovies(customerRatingInfos, broadcastTopMovies.getValue()))
-                        // get only top movies ratings
+                        // get only ratings of top movies
                 .mapValues(ratingInfos -> getMatchingMoviesRatings(ratingInfos, broadcastTopMovies.getValue()))
                         // get average of top movies ratings
                 .mapValues(CollectionUtils::average)
@@ -159,6 +195,13 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                 .collect(toSet());
     }
 
+    /**
+     * Returns true if collectionOfCustomerRates contains all specified movies IDs
+     *
+     * @param customerRatingInfos - Tuple2 of (customerId, collectionOfCustomerRates)
+     * @param movies              - specified movies IDs
+     * @return
+     */
     private boolean isCustomerRatedAllMovies(Tuple2<Integer, Iterable<RatingInfo>> customerRatingInfos, Set<Integer> movies) {
         // Since the number of movies is in the hundreds of thousands (< 1 000 000),
         // the size of HashSet is < ~24MB ( (16 bytes (object overhead) + 4 bytes (int)+ 4 bytes (padding)) * 1 000 000).
@@ -169,6 +212,13 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
         return ratedMovies.containsAll(movies);
     }
 
+    /**
+     * Returns ratings values of specified movies
+     *
+     * @param ratingInfos   - movies ratings infos, from which only the ratings of movies with specified IDs should be selected
+     * @param moviesToMatch - specified movies IDs
+     * @return
+     */
     private List<Integer> getMatchingMoviesRatings(Iterable<RatingInfo> ratingInfos, Set<Integer> moviesToMatch) {
         List<Integer> matchedMoviesRatings = new LinkedList<>();
         ratingInfos.forEach(ratingInfo -> {
@@ -183,8 +233,10 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                                                                     Broadcast<Set<Integer>> customers,
                                                                     JavaPairRDD<Integer, MovieInfo> moviesInfoRdd,
                                                                     JavaPairRDD<Integer, Set<RatingInfo>> movieRatingsRdd) {
+        // PairRDD (customerId, RatingInfo)
         JavaPairRDD<Integer, RatingInfo> customersRates = mapRatingsBySuppliedCustomers(customers, movieRatingsRdd)
                 .cache();
+        // Map (customerId, maxRate)
         Broadcast<Map<Integer, Integer>> customersMaxRates = ctx.broadcast(getCustomersMaxRates(customersRates).collectAsMap());
 
         return customersRates
@@ -211,11 +263,19 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
                 .reduceByKey((rating1, rating2) -> rating1 > rating2 ? rating1 : rating2);
     }
 
+    /**
+     * Returns an PairRDD (customerId, RatingInfo) of specified customers IDs
+     *
+     * @param customers       - specified customers IDs
+     * @param movieRatingsRdd - PairRDD (movieId, Set<RatingInfo>)
+     * @return
+     */
     private JavaPairRDD<Integer, RatingInfo> mapRatingsBySuppliedCustomers(Broadcast<Set<Integer>> customers,
                                                                            JavaPairRDD<Integer, Set<RatingInfo>> movieRatingsRdd) {
         return movieRatingsRdd
+                // transform PairRDD (movieId, Set<RatingInfo>) to RDD (RatingInfo)
                 .flatMap(movieRatingTuple -> movieRatingTuple._2().iterator())
-                        //keep only supplied customers rates
+                        //keep RatingInfo only of supplied customers
                 .filter(ratingInfo -> customers.getValue().contains(ratingInfo.getCustomerId()))
                 .mapToPair(ratingInfo -> new Tuple2<>(ratingInfo.getCustomerId(), ratingInfo));
     }
@@ -266,6 +326,12 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
         return ratingsFilesPath + PATH_SEPARATOR + FILES_MASK;
     }
 
+    /**
+     * Comparator of Tuple2(movieId, Tuple2(averageMovieRating, MovieInfo)).
+     * Comparator prefers movie with larger averageMovieRating.
+     * If average ratings of two movies (averageMovieRating) are the same, comparator prefers
+     * the most recent movie release year, then alphabetical order of movie title.
+     */
     private static class RatingMovieDetailsComparator implements Comparator<Tuple2<Integer, Tuple2<Double, MovieInfo>>>, Serializable {
         @Override
         public int compare(Tuple2<Integer, Tuple2<Double, MovieInfo>> idRatingMovieDetails1, Tuple2<Integer, Tuple2<Double, MovieInfo>> idRatingMovieDetails2) {
@@ -283,6 +349,11 @@ public class ContrarianTastesRetrieverRddImpl extends AbstractContrarianTastesRe
         }
     }
 
+    /**
+     * Comparator of Tuple2(customerId, averageRatingOfTopMovies).
+     * Comparator prefers customer who has given the lowest average rating of the top movies.
+     * If average rates of two customers are the same, comparator prefers customer with the lower ID.
+     */
     private static class ContrarianRatingsComparator implements Comparator<Tuple2<Integer, Double>>, Serializable {
         @Override
         public int compare(Tuple2<Integer, Double> customerRatingTuple1, Tuple2<Integer, Double> customerRatingTuple2) {
